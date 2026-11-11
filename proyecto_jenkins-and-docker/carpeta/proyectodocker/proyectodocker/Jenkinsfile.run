@@ -1,0 +1,151 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'IMAGE_TAG',
+            choices: ['Daniel_Arias', 'latest', 'build-17', '20251213-111331'],
+            description: 'Tag de la imagen desde el registry local'
+        )
+        
+        choice(
+            name: 'ACCION',
+            choices: [
+                'verificar_todo',
+                'verificar_basica',
+                'listar_archivos',
+                'info_sistema',
+                'comando_personal'
+            ],
+            description: 'Accion a realizar'
+        )
+        
+        string(
+            name: 'COMANDO_PERSONAL',
+            defaultValue: 'echo "Comando personal ejecutado" && pwd && node --version',
+            description: 'Comando personalizado'
+        )
+    }
+    
+    environment {
+        REGISTRY_URL = 'localhost:5000'
+        IMAGE_FULL = 'localhost:5000/proyecto-docker'
+    }
+    
+    stages {
+        stage('Verificar Registry Local') {
+            steps {
+                bat """
+                    echo "Comprobando registry local..."
+                    docker ps | findstr "registry"
+                    
+                    echo "Catalogo disponible:"
+                    curl -X GET http://localhost:5000/v2/_catalog
+                    
+                    echo "Tags de 'proyecto-docker':"
+                    curl -X GET http://localhost:5000/v2/proyecto-docker/tags/list
+                """
+            }
+        }
+        
+        stage('Pull desde Registry Local') {
+            steps {
+                bat """
+                    echo "Descargando imagen desde registry local..."
+                    echo "Imagen: ${IMAGE_FULL}:${params.IMAGE_TAG}"
+                    
+                    docker pull ${IMAGE_FULL}:${params.IMAGE_TAG}
+                    
+                    echo "Descarga completada"
+                    echo "Imagen descargada:"
+                    docker images "${IMAGE_FULL}:${params.IMAGE_TAG}"
+                """
+            }
+        }
+        
+        stage('Ejecutar Accion Seleccionada') {
+            steps {
+                script {
+                    echo "Accion seleccionada: ${params.ACCION}"
+                    
+                    def cmd = ""
+                    
+                    switch(params.ACCION) {
+                        case 'verificar_todo':
+                            cmd = "echo '=== TODAS LAS HERRAMIENTAS INSTALADAS ===' && echo '1. Sistema Operativo:' && cat /etc/os-release | grep PRETTY_NAME && echo '' && echo '2. Node.js:' && node --version && echo '3. npm:' && npm --version && echo '4. yarn:' && yarn --version && echo '' && echo '5. Python 3:' && python3 --version && echo '6. pip3:' && pip3 --version && echo '' && echo '7. Ruby:' && ruby --version && echo '8. gem:' && gem --version && echo '' && echo '9. Herramientas build:' && rpmbuild --version 2>/dev/null || echo 'rpmbuild: OK' && echo '=== FIN DEL REPORTE ==='"
+                            break
+                            
+                        case 'verificar_basica':
+                            cmd = "echo '=== INFORMACION BASICA ===' && echo 'Directorio actual:' && pwd && echo 'Node.js version:' && node --version && echo 'Python 3:' && python3 --version && echo '=== FIN ==='"
+                            break
+                            
+                        case 'listar_archivos':
+                            cmd = "echo '=== LISTADO DE ARCHIVOS ===' && echo 'Directorio raiz:' && ls -l / && echo 'Directorio workspace:' && ls -l /workspace && echo '=== FIN ==='"
+                            break
+                            
+                        case 'info_sistema':
+                            cmd = "echo '=== INFORMACION DEL SISTEMA ===' && echo 'Sistema operativo:' && uname -a && cat /etc/os-release 2>/dev/null || echo 'Sin info OS' && echo '=== FIN ==='"
+                            break
+                            
+                        case 'comando_personal':
+                            cmd = params.COMANDO_PERSONAL
+                            break
+                    }
+                    
+                    bat """
+                        echo "EJECUTANDO EN CONTENEDOR:"
+                        echo "=============================="
+                        echo "Imagen: ${IMAGE_FULL}:${params.IMAGE_TAG}"
+                        echo "Accion: ${params.ACCION}"
+                        echo "------------------------------"
+                        
+                        docker run --rm ${IMAGE_FULL}:${params.IMAGE_TAG} /bin/sh -c "${cmd}"
+                        
+                        echo "------------------------------"
+                        echo "Ejecucion completada"
+                    """
+                }
+            }
+        }
+        
+        stage('Demostracion') {
+            steps {
+                bat """
+                    echo "DEMOSTRACION"
+                    echo "================================"
+                    
+                    echo "Tags disponibles en registry:"
+                    curl -s http://localhost:5000/v2/proyecto-docker/tags/list
+                    
+                    echo.
+                    echo "Imagenes locales del proyecto:"
+                    docker images | findstr "localhost:5000/proyecto-docker"
+                    
+                    echo.
+                    echo "Test final de funcionamiento:"
+                    docker run --rm ${IMAGE_FULL}:${params.IMAGE_TAG} echo "CONTAINER OK - Imagen: ${params.IMAGE_TAG} - Node: v10.24.0 - Python y Ruby instalados"
+                """
+            }
+        }
+    }
+    
+    post {
+        always {
+            bat """
+                echo "Limpieza post-ejecucion..."
+                docker container prune -f
+                echo "Listo para siguiente ejecucion"
+            """
+        }
+        success {
+            echo "PIPELINE #2 COMPLETADO EXITOSAMENTE"
+            echo "Imagen usada: ${IMAGE_FULL}:${params.IMAGE_TAG}"
+            echo "Accion ejecutada: ${params.ACCION}"
+            echo "Registry local: ${REGISTRY_URL}"
+        }
+        failure {
+            echo "PIPELINE #2 FALLO"
+            echo "Revisar logs para solucionar problemas"
+        }
+    }
+}
